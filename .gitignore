@@ -1,0 +1,9 @@
+.env
+.env.*
+credentials.json
+token.json
+client_secret*.json
+__pycache__/
+*.py[cod]
+downloads/
+.DS_Store
