@@ -1,4 +1,4 @@
-```python
+
 import json
 import logging
 import random
@@ -7,15 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# =========================================================
-# SETTINGS
-# =========================================================
-
 HISTORY_FILE = Path("data/title_history.json")
-
-# =========================================================
-# 200 ORIGINAL MUSIC TITLES
-# =========================================================
 
 TITLES = [
     "Lost in the Rhythm",
@@ -212,18 +204,15 @@ TITLES = [
     "Forever in This Moment",
 ]
 
-# =========================================================
-# TITLE HISTORY
-# =========================================================
 
 def load_history():
     try:
         if HISTORY_FILE.exists():
-            with open(HISTORY_FILE, "r", encoding="utf-8") as file:
+            with HISTORY_FILE.open("r", encoding="utf-8") as file:
                 data = json.load(file)
 
-                if isinstance(data, list):
-                    return data
+            if isinstance(data, list):
+                return data
 
     except (OSError, json.JSONDecodeError):
         logger.exception("Could not read title history.")
@@ -236,7 +225,7 @@ def save_history(history):
 
     temporary_file = HISTORY_FILE.with_suffix(".tmp")
 
-    with open(temporary_file, "w", encoding="utf-8") as file:
+    with temporary_file.open("w", encoding="utf-8") as file:
         json.dump(history, file, indent=2, ensure_ascii=False)
 
     os.replace(temporary_file, HISTORY_FILE)
@@ -251,21 +240,24 @@ def generate_random_title():
     ]
 
     if not available:
-        logger.info("All titles used. Resetting title history.")
-        history = []
+        logger.warning("All titles used. Starting a new title cycle.")
         available = TITLES.copy()
 
-    selected_title = random.choice(available)
-
-    history.append(selected_title)
-    save_history(history)
-
-    return selected_title
+    return random.choice(available)
 
 
-# =========================================================
-# MUSIC METADATA
-# =========================================================
+def commit_title(title):
+    """Save a title only after its video uploads successfully."""
+    if not title:
+        return
+
+    history = load_history()
+
+    if title not in history:
+        history.append(title)
+        save_history(history)
+        logger.info("Title added to history: %s", title)
+
 
 def detect_music_type(filename):
     name = filename.lower()
@@ -286,10 +278,6 @@ def detect_music_type(filename):
 
     return "music"
 
-
-# =========================================================
-# METADATA GENERATOR
-# =========================================================
 
 def build_metadata(filename):
     title = generate_random_title()
@@ -326,20 +314,11 @@ def build_metadata(filename):
 
 
 def generate_metadata(filename):
-    """
-    Fully offline metadata generation.
-    No Gemini, Groq, OpenAI or external AI API.
-    """
-
+    """Fully offline metadata generation."""
     logger.info("Using local music metadata generator.")
-
     return build_metadata(filename)
 
 
 def generate_fallback_metadata(filename):
-    """
-    Backward compatibility with existing main.py.
-    """
-
+    """Backward compatibility with existing main.py."""
     return build_metadata(filename)
-```
