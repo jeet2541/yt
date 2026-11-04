@@ -24,13 +24,15 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      # 1. CHECKOUT
+
+      # 1. CHECKOUT REPOSITORY
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+          fetch-depth: 0
 
-      # 2. PYTHON SETUP WITH PIP CACHE
+      # 2. SETUP PYTHON WITH CACHE
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -79,7 +81,7 @@ jobs:
           print("All required secrets are available.")
           PY
 
-      # 5. RUN AUTOMATION
+      # 5. RUN YOUTUBE AUTOMATION
       - name: Run YouTube automation
         env:
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
@@ -93,7 +95,7 @@ jobs:
         run: |
           python -m src.main
 
-      # 6. SAVE HISTORY
+      # 6. SAVE HISTORY WITH AUTOMATIC RETRIES
       - name: Save automation history
         if: always()
         run: |
@@ -101,11 +103,44 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           mkdir -p data
+
           git add -A data/
 
           if git diff --cached --quiet; then
             echo "No history changes to save."
-          else
-            git commit -m "Update YouTube automation history"
-            git push
+            exit 0
           fi
+
+          git commit -m "Update YouTube automation history"
+
+          for attempt in 1 2 3 4 5; do
+
+            echo "Push attempt $attempt of 5"
+
+            # Fetch latest remote changes
+            git fetch origin main
+
+            # Rebase local commit onto latest main
+            if ! git rebase origin/main; then
+              echo "Rebase failed. Aborting."
+              git rebase --abort || true
+              exit 1
+            fi
+
+            # Push updated history
+            if git push origin HEAD:main; then
+              echo "History pushed successfully."
+              exit 0
+            fi
+
+            echo "Push failed."
+
+            if [ "$attempt" -lt 5 ]; then
+              echo "Retrying in 15 seconds..."
+              sleep 15
+            fi
+
+          done
+
+          echo "ERROR: History push failed after 5 attempts."
+          exit 1
