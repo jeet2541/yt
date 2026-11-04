@@ -1,8 +1,8 @@
-```python
+
 import os
 import logging
 
-from src.ai_metadata import generate_metadata
+from src.ai_metadata import generate_metadata, commit_title
 from src.drive_manager import download_video, list_videos
 
 from src.duplicate_checker import (
@@ -30,9 +30,7 @@ logger = logging.getLogger(__name__)
 # SETTINGS
 # =========================================================
 
-DAILY_UPLOAD_LIMIT = int(
-    os.getenv("DAILY_UPLOAD_LIMIT", "1")
-)
+DAILY_UPLOAD_LIMIT = int(os.getenv("DAILY_UPLOAD_LIMIT", "1"))
 
 
 # =========================================================
@@ -61,9 +59,7 @@ def main():
         videos = list_videos()
 
     except Exception:
-        logger.exception(
-            "Could not retrieve videos from Google Drive."
-        )
+        logger.exception("Could not retrieve videos from Google Drive.")
         return
 
     if not videos:
@@ -84,6 +80,7 @@ def main():
             break
 
         local_path = None
+        upload_succeeded = False
 
         video_name = video.get("name", "Unknown video")
         video_id = video.get("id")
@@ -105,10 +102,7 @@ def main():
 
             logger.info("Downloading original video from Drive...")
 
-            local_path = download_video(
-                video_id,
-                video_name
-            )
+            local_path = download_video(video_id, video_name)
 
             if not local_path or not os.path.isfile(local_path):
                 raise FileNotFoundError(
@@ -132,18 +126,16 @@ def main():
             digest = file_sha256(local_path)
 
             if is_duplicate(video_id, digest):
-
                 logger.info(
                     "Duplicate detected. Skipping: %s",
                     video_name
                 )
-
                 skipped_count += 1
                 continue
 
             logger.info("Video is not a duplicate.")
 
-            # 3. GENERATE LOCAL MUSIC METADATA
+            # 3. GENERATE METADATA
 
             logger.info("Generating music metadata...")
 
@@ -168,15 +160,14 @@ def main():
 
             logger.info("Uploading original video to YouTube...")
 
-            youtube_id = upload_video(
-                local_path,
-                metadata
-            )
+            youtube_id = upload_video(local_path, metadata)
 
             if not youtube_id:
                 raise RuntimeError(
                     "YouTube upload returned no video ID."
                 )
+
+            upload_succeeded = True
 
             logger.info(
                 "YouTube upload successful: %s",
@@ -187,19 +178,31 @@ def main():
 
             logger.info("Saving upload history...")
 
-            record_upload(
-                video,
-                digest,
-                youtube_id
-            )
+            record_upload(video, digest, youtube_id)
+
+            # 6. SAVE TITLE HISTORY ONLY AFTER SUCCESS
+
+            commit_title(metadata["title"])
 
             uploaded_count += 1
 
-            logger.info("VIDEO COMPLETED SUCCESSFULLY")
+            logger.info(
+                "VIDEO COMPLETED SUCCESSFULLY: https://www.youtube.com/watch?v=%s",
+                youtube_id
+            )
 
         except Exception:
 
             failed_count += 1
+
+            if upload_succeeded:
+                logger.critical(
+                    "Video was uploaded, but history saving failed. "
+                    "YouTube ID: %s | Drive ID: %s. "
+                    "Check upload history before rerunning.",
+                    youtube_id,
+                    video_id
+                )
 
             logger.exception(
                 "VIDEO PROCESSING FAILED: %s",
@@ -208,7 +211,7 @@ def main():
 
         finally:
 
-            # 6. CLEANUP
+            # 7. CLEANUP
 
             if local_path and os.path.isfile(local_path):
 
@@ -245,4 +248,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
