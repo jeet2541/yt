@@ -1,150 +1,322 @@
-
-import os
-import re
+```python
 import json
-import hashlib
 import logging
+import random
+import os
 from pathlib import Path
 
-from google import genai
-from groq import Groq
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
-)
+logger = logging.getLogger(__name__)
 
 # =========================================================
 # SETTINGS
 # =========================================================
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+HISTORY_FILE = Path("data/title_history.json")
 
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
+# =========================================================
+# 200 ORIGINAL MUSIC TITLES
+# =========================================================
+
+TITLES = [
+    "Lost in the Rhythm",
+    "Midnight Dreams",
+    "Echoes of Silence",
+    "A Sky Full of Memories",
+    "Somewhere Beyond the Stars",
+    "Fading Into the Night",
+    "The Feeling Never Ends",
+    "Dreams in Slow Motion",
+    "A Moment Called Forever",
+    "Where Time Stands Still",
+    "Dancing With the Shadows",
+    "Memories in Motion",
+    "A World Without Noise",
+    "Beyond the Horizon",
+    "Silence Between the Notes",
+    "The Sound of Memories",
+    "Chasing Endless Dreams",
+    "Lost Somewhere in Time",
+    "When the World Sleeps",
+    "A Beautiful Escape",
+    "Falling Through Memories",
+    "Under the Midnight Sky",
+    "The Art of Letting Go",
+    "Somewhere in Another Life",
+    "A Feeling Without Words",
+    "Waves of Emotion",
+    "The Last Light",
+    "A Different Kind of Peace",
+    "Dreaming With Open Eyes",
+    "Nothing Lasts Forever",
+    "Shadows of Yesterday",
+    "The Calm Within Chaos",
+    "Floating Through Time",
+    "A Thousand Silent Thoughts",
+    "Beyond What We Know",
+    "The Beauty of Silence",
+    "One Last Memory",
+    "A Place Called Home",
+    "The World in Slow Motion",
+    "Everything Feels Different",
+    "Fading Lights",
+    "Endless Night Drive",
+    "Somewhere Far Away",
+    "Lost in Another Dimension",
+    "The Sound of Freedom",
+    "Chasing the Moonlight",
+    "A Million Little Feelings",
+    "The Night We Remember",
+    "Dreams Never Fade",
+    "A Little Piece of Heaven",
+    "Golden Memories",
+    "Into the Unknown",
+    "The Last Goodbye",
+    "Moments We Cannot Repeat",
+    "A World of Our Own",
+    "Midnight Reflections",
+    "Somewhere Between Dreams",
+    "The Feeling of Infinity",
+    "After the Rain",
+    "A Beautiful Kind of Sadness",
+    "Beyond the Clouds",
+    "Lost in the Atmosphere",
+    "The Rhythm of Life",
+    "A Quiet Revolution",
+    "Stars Above Us",
+    "The Other Side of Reality",
+    "Time Moves Slowly",
+    "The Space Between Us",
+    "A Journey Through Sound",
+    "Memories That Stay",
+    "Into the Blue",
+    "When Dreams Become Real",
+    "The Endless Summer",
+    "A Night to Remember",
+    "Echoes From the Past",
+    "The World Feels Smaller",
+    "A Thousand Miles Away",
+    "Nothing But the Moment",
+    "Under Electric Skies",
+    "The Last Summer Night",
+    "Lost Without a Map",
+    "The Feeling of Being Alive",
+    "A Place Beyond Words",
+    "Drifting Through the Night",
+    "The Sound of Tomorrow",
+    "Another Beautiful Day",
+    "A Dream Within a Dream",
+    "The Midnight Journey",
+    "Where Memories Live",
+    "A Moment of Eternity",
+    "The Silence We Share",
+    "Falling Into Place",
+    "A Little More Time",
+    "The Universe Within",
+    "Somewhere We Belong",
+    "The Night Is Young",
+    "Beautifully Broken",
+    "The Road to Somewhere",
+    "A Thousand Dreams Away",
+    "The Magic of the Moment",
+    "Beyond the Silence",
+    "Lost in Your Thoughts",
+    "A New Beginning",
+    "The Last Horizon",
+    "Everything Is Temporary",
+    "A World Made of Sound",
+    "The Beauty of Letting Go",
+    "Through the Endless Night",
+    "A Feeling Called Nostalgia",
+    "Somewhere in the Universe",
+    "The Sound of Yesterday",
+    "A Place in the Stars",
+    "Dreams After Dark",
+    "The Rhythm Never Stops",
+    "Time Is Just a Feeling",
+    "A Moment in Paradise",
+    "Where the Light Begins",
+    "Lost in the Memories",
+    "The Art of Dreaming",
+    "A Different Reality",
+    "Nothing Feels the Same",
+    "A Sky Without Limits",
+    "The Last Piece of Summer",
+    "Floating Above the Clouds",
+    "A Beautiful Distance",
+    "The Night Belongs to Us",
+    "Beyond the Ordinary",
+    "The Sound of the Ocean",
+    "Memories Under Moonlight",
+    "A Little Bit of Forever",
+    "When Silence Speaks",
+    "The Feeling of Yesterday",
+    "Somewhere in the Darkness",
+    "The World Beyond",
+    "A Thousand Broken Stars",
+    "Lost Between the Lines",
+    "The Beauty of Now",
+    "One More Night",
+    "The Endless Road",
+    "A Moment Outside Time",
+    "Dreams in the Distance",
+    "The Sound of Midnight",
+    "Everything We Never Said",
+    "A Universe of Feelings",
+    "Where the Night Begins",
+    "Chasing Distant Lights",
+    "The Last Beautiful Moment",
+    "A Different Frequency",
+    "Lost in the Sound",
+    "The Weight of Memories",
+    "A Place Without Time",
+    "Beyond Every Boundary",
+    "The Sky Remembers",
+    "Somewhere After Midnight",
+    "A Beautiful Unknown",
+    "The Feeling of Home",
+    "Dancing Through Time",
+    "A Thousand Different Worlds",
+    "The Sound of Dreams",
+    "Nothing Beyond This Moment",
+    "The Other Side of Night",
+    "Memories in the Rain",
+    "A Little More Magic",
+    "The World in Our Eyes",
+    "Somewhere We Can Escape",
+    "A Night Full of Stars",
+    "The Endless Feeling",
+    "When Everything Fades",
+    "Lost in the Blue",
+    "The Art of Being Free",
+    "A Beautiful Silence",
+    "Beyond the Last Light",
+    "The Space of Dreams",
+    "Moments Like These",
+    "A Story Without Words",
+    "The Sound of Forever",
+    "Where Time Disappears",
+    "A Feeling Worth Keeping",
+    "The Midnight Atmosphere",
+    "Somewhere Beyond Reality",
+    "The Journey Within",
+    "A World of Endless Possibilities",
+    "The Last Dream",
+    "When Stars Align",
+    "Nothing But Memories",
+    "A Beautiful State of Mind",
+    "The Night Feels Different",
+    "Lost in Endless Motion",
+    "The Soundtrack of Life",
+    "A Moment to Breathe",
+    "The Beauty of the Unknown",
+    "Forever in This Moment",
 ]
 
 # =========================================================
-# LOCAL CAPTION BANK
+# TITLE HISTORY
 # =========================================================
 
-CAPTION_BANK = {
-    "sunset": [
-        "Where the sky turns gold and time slows down.",
-        "A little moment between daylight and dreams.",
-        "Some sunsets feel like a beautiful goodbye.",
-        "Golden skies and peaceful minds.",
-    ],
-    "ocean": [
-        "Somewhere between the waves and silence.",
-        "Let the ocean carry your thoughts away.",
-        "A peaceful moment by the endless blue.",
-        "Where every wave tells a story.",
-    ],
-    "night": [
-        "Somewhere in the quiet of the night.",
-        "The world feels different after dark.",
-        "Lost in the beauty of the midnight sky.",
-        "A little silence in a noisy world.",
-    ],
-    "forest": [
-        "Where nature speaks without words.",
-        "A quiet escape into the green.",
-        "Finding peace between the trees.",
-        "Sometimes all you need is nature.",
-    ],
-    "road": [
-        "Some roads are meant to be remembered.",
-        "A journey with no need for a destination.",
-        "Chasing moments, not places.",
-        "Let the road decide the story.",
-    ],
-    "mountain": [
-        "Closer to the sky, further from the noise.",
-        "Some views make everything feel smaller.",
-        "Finding freedom above the clouds.",
-        "A moment worth climbing for.",
-    ],
-    "dream": [
-        "Somewhere between reality and imagination.",
-        "A feeling that words cannot explain.",
-        "Little moments, endless memories.",
-        "A world of beautiful possibilities.",
-    ],
-    "default": [
-        "A moment worth remembering.",
-        "Sometimes simple moments feel extraordinary.",
-        "Collecting moments, one frame at a time.",
-        "A little beauty in everyday life.",
-    ],
-}
+def load_history():
+    try:
+        if HISTORY_FILE.exists():
+            with open(HISTORY_FILE, "r", encoding="utf-8") as file:
+                data = json.load(file)
+
+                if isinstance(data, list):
+                    return data
+
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Could not read title history.")
+
+    return []
 
 
-def detect_category(filename):
+def save_history(history):
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary_file = HISTORY_FILE.with_suffix(".tmp")
+
+    with open(temporary_file, "w", encoding="utf-8") as file:
+        json.dump(history, file, indent=2, ensure_ascii=False)
+
+    os.replace(temporary_file, HISTORY_FILE)
+
+
+def generate_random_title():
+    history = load_history()
+
+    available = [
+        title for title in TITLES
+        if title not in history
+    ]
+
+    if not available:
+        logger.info("All titles used. Resetting title history.")
+        history = []
+        available = TITLES.copy()
+
+    selected_title = random.choice(available)
+
+    history.append(selected_title)
+    save_history(history)
+
+    return selected_title
+
+
+# =========================================================
+# MUSIC METADATA
+# =========================================================
+
+def detect_music_type(filename):
     name = filename.lower()
 
-    keywords = {
-        "sunset": ["sunset", "sunrise", "golden", "dusk", "sky"],
-        "ocean": ["ocean", "sea", "beach", "wave", "water"],
-        "night": ["night", "moon", "stars", "midnight", "dark"],
-        "forest": ["forest", "tree", "nature", "green", "wood"],
-        "road": ["road", "drive", "car", "highway", "street"],
-        "mountain": ["mountain", "hill", "snow", "peak"],
-        "dream": ["dream", "aesthetic", "abstract", "universe"],
+    categories = {
+        "lofi": ["lofi", "lo-fi", "chill", "study"],
+        "phonk": ["phonk", "drift", "aggressive"],
+        "ambient": ["ambient", "atmosphere", "space"],
+        "slowed": ["slowed", "reverb", "slowed-reverb"],
+        "remix": ["remix", "edit", "mix"],
+        "instrumental": ["instrumental", "piano", "guitar"],
+        "electronic": ["edm", "electronic", "synth", "techno"],
     }
 
-    for category, words in keywords.items():
-        if any(word in name for word in words):
+    for category, keywords in categories.items():
+        if any(keyword in name for keyword in keywords):
             return category
 
-    return "default"
+    return "music"
 
 
 # =========================================================
-# LOCAL FALLBACK
+# METADATA GENERATOR
 # =========================================================
 
-def generate_fallback_metadata(filename):
-    category = detect_category(filename)
-
-    captions = CAPTION_BANK.get(
-        category,
-        CAPTION_BANK["default"]
-    )
-
-    # Stable selection: same filename gets same caption
-    digest = hashlib.sha256(
-        filename.encode("utf-8")
-    ).hexdigest()
-
-    index = int(digest[:8], 16) % len(captions)
-    title = captions[index]
-
-    clean_name = Path(filename).stem
-    clean_name = re.sub(r"[_-]+", " ", clean_name)
-    clean_name = re.sub(r"\s+", " ", clean_name).strip()
+def build_metadata(filename):
+    title = generate_random_title()
+    music_type = detect_music_type(filename)
 
     description = (
         f"{title}\n\n"
-        f"Enjoy this aesthetic {category} video. "
-        f"Follow for more beautiful moments and visual inspiration.\n\n"
-        "#shorts #aesthetic #viral"
+        "Enjoy the music and let the moment take over.\n"
+        "Subscribe for more music and sound experiences.\n\n"
+        "#music #shorts #musicshorts #viralshorts"
     )
 
     tags = [
+        "music",
+        "music shorts",
         "shorts",
-        "youtube shorts",
-        "aesthetic",
-        category,
-        "beautiful moments",
-        "cinematic",
-        "visuals",
-        "relaxing",
+        "viral music",
+        "music edit",
+        "sound",
+        "music vibes",
+        music_type,
+        "audio",
+        "music lovers",
     ]
 
-    logging.warning("Using local fallback metadata.")
+    logger.info("Music type detected: %s", music_type)
+    logger.info("Random title selected: %s", title)
 
     return {
         "title": title[:100],
@@ -152,276 +324,22 @@ def generate_fallback_metadata(filename):
         "tags": tags[:15],
     }
 
-
-# =========================================================
-# PROMPT
-# =========================================================
-
-PROMPT_TEMPLATE = """
-You are a professional YouTube Shorts metadata expert.
-
-Create attractive, natural and aesthetic metadata for a short video.
-
-Video filename: {filename}
-
-IMPORTANT RULES:
-
-1. Create a beautiful, engaging and natural title.
-2. Title should feel emotional, cinematic or interesting.
-3. Avoid generic clickbait.
-4. Do not mention that the title was generated by AI.
-5. Create a short, attractive description.
-6. Include relevant hashtags in the description.
-7. Generate 8 to 15 relevant YouTube tags.
-8. Do not invent specific events or objects that cannot be confirmed
-   from the filename.
-9. Return ONLY valid JSON. No markdown or explanation.
-
-Required JSON structure:
-
-{{
-  "title": "Your creative title here",
-  "description": "Your engaging description here",
-  "tags": ["tag1", "tag2", "tag3"]
-}}
-"""
-
-
-# =========================================================
-# JSON PARSER
-# =========================================================
-
-def parse_metadata(response_text):
-    if not response_text:
-        raise ValueError("Empty AI response.")
-
-    text = response_text.strip()
-
-    # Remove Markdown code fences if present
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-
-    # Extract JSON object
-    start = text.find("{")
-    end = text.rfind("}")
-
-    if start == -1 or end == -1:
-        raise ValueError("No JSON object found in AI response.")
-
-    data = json.loads(text[start:end + 1])
-
-    title = str(data.get("title", "")).strip()
-    description = str(data.get("description", "")).strip()
-    tags = data.get("tags", [])
-
-    if not title:
-        raise ValueError("AI returned an empty title.")
-
-    if not isinstance(tags, list):
-        tags = []
-
-    tags = [
-        str(tag).strip()
-        for tag in tags
-        if str(tag).strip()
-    ]
-
-    return {
-        "title": title[:100],
-        "description": description[:5000],
-        "tags": tags[:15],
-    }
-
-
-# =========================================================
-# GEMINI
-# =========================================================
-
-def try_gemini(filename):
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is missing.")
-
-    logging.info("Starting Gemini metadata generation.")
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
-    prompt = PROMPT_TEMPLATE.replace(
-        "{filename}",
-        Path(filename).name
-    )
-
-    models = []
-
-    for model in client.models.list():
-        model_name = getattr(model, "name", None)
-        supported_actions = getattr(
-            model,
-            "supported_actions",
-            []
-        ) or []
-
-        if not model_name:
-            continue
-
-        # Only use models that support content generation
-        if "generateContent" not in supported_actions:
-            continue
-
-        models.append(model_name)
-
-    if not models:
-        raise RuntimeError("No Gemini generateContent models found.")
-
-    # Prefer Flash models first
-    models.sort(
-        key=lambda name: (
-            "flash" not in name.lower(),
-            name.lower()
-        )
-    )
-
-    logging.info(
-        "Gemini generation-capable models discovered: %s",
-        len(models)
-    )
-
-    errors = []
-
-    for model_name in models:
-        try:
-            logging.info("Trying Gemini model: %s", model_name)
-
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-
-            metadata = parse_metadata(response.text)
-
-            logging.info(
-                "Gemini succeeded with model: %s",
-                model_name
-            )
-
-            return metadata
-
-        except Exception as error:
-            logging.warning(
-                "Gemini model failed: %s | %s",
-                model_name,
-                error
-            )
-            errors.append(str(error))
-
-    raise RuntimeError(
-        "All Gemini models failed. " + " | ".join(errors[-3:])
-    )
-
-
-# =========================================================
-# GROQ
-# =========================================================
-
-def try_groq(filename):
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY is missing.")
-
-    logging.info("Starting Groq metadata generation.")
-
-    client = Groq(api_key=GROQ_API_KEY)
-
-    prompt = PROMPT_TEMPLATE.replace(
-        "{filename}",
-        Path(filename).name
-    )
-
-    errors = []
-
-    for model_name in GROQ_MODELS:
-        try:
-            logging.info("Trying Groq model: %s", model_name)
-
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an expert YouTube Shorts "
-                            "metadata generator. Return only valid JSON."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                temperature=0.8,
-                max_tokens=500,
-            )
-
-            response_text = (
-                response.choices[0].message.content
-            )
-
-            metadata = parse_metadata(response_text)
-
-            logging.info(
-                "Groq succeeded with model: %s",
-                model_name
-            )
-
-            return metadata
-
-        except Exception as error:
-            logging.warning(
-                "Groq model failed: %s | %s",
-                model_name,
-                error
-            )
-            errors.append(str(error))
-
-    raise RuntimeError(
-        "All Groq models failed. " + " | ".join(errors[-3:])
-    )
-
-
-# =========================================================
-# MAIN METADATA GENERATION
-# =========================================================
 
 def generate_metadata(filename):
-    logging.info("=" * 55)
-    logging.info("AI METADATA GENERATION STARTED")
-    logging.info("File: %s", filename)
-    logging.info("=" * 55)
+    """
+    Fully offline metadata generation.
+    No Gemini, Groq, OpenAI or external AI API.
+    """
 
-    # 1. Gemini
-    try:
-        metadata = try_gemini(filename)
-        logging.info("Metadata provider: Gemini")
-        return metadata
+    logger.info("Using local music metadata generator.")
 
-    except Exception:
-        logging.exception(
-            "Gemini failed. Switching to Groq."
-        )
+    return build_metadata(filename)
 
-    # 2. Groq
-    try:
-        metadata = try_groq(filename)
-        logging.info("Metadata provider: Groq")
-        return metadata
 
-    except Exception:
-        logging.exception(
-            "Groq failed. Switching to local fallback."
-        )
+def generate_fallback_metadata(filename):
+    """
+    Backward compatibility with existing main.py.
+    """
 
-    # 3. Local fallback
-    metadata = generate_fallback_metadata(filename)
-
-    logging.info("Metadata provider: Local fallback")
-    logging.info("Fallback title: %s", metadata["title"])
-
-    return metadata
+    return build_metadata(filename)
+```
