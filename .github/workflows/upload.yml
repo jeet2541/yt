@@ -30,18 +30,18 @@ jobs:
         with:
           persist-credentials: true
 
-      # 2. PYTHON SETUP
+      # 2. PYTHON SETUP WITH PIP CACHE
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements.txt
 
       # 3. INSTALL DEPENDENCIES
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install --disable-pip-version-check --prefer-binary -r requirements.txt
 
       # 4. CHECK REQUIRED SECRETS
       - name: Check required secrets
