@@ -1,0 +1,52 @@
+name: Shorts AI Automation
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:00 IST and 17:00 IST (GitHub cron uses UTC)
+    - cron: "30 3 * * *"
+    - cron: "30 11 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shorts-ai-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run uploader
+        env:
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DAILY_UPLOAD_LIMIT: "1"
+          YOUTUBE_PRIVACY: "private"
+          YOUTUBE_CATEGORY_ID: "22"
+          TIMEZONE: "Asia/Kolkata"
+        run: python -m src.main
+
+      - name: Save duplicate history
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/upload_history.json
+          git diff --cached --quiet || git commit -m "Update upload history"
+          git push
