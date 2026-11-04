@@ -1,4 +1,4 @@
-```yaml
+
 name: YouTube Music Automation
 
 on:
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: youtube-shorts-automation
+  group: youtube-music-automation
   cancel-in-progress: false
 
 jobs:
@@ -109,4 +109,3 @@ jobs:
             git commit -m "Update YouTube automation history"
             git push
           fi
-```
