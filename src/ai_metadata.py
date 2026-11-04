@@ -1,6 +1,8 @@
 
 import json
 import os
+import time
+
 from google import genai
 from google.genai import types
 
@@ -9,7 +11,9 @@ def generate_metadata(filename):
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
-        raise RuntimeError("GitHub Secret GEMINI_API_KEY is missing.")
+        raise RuntimeError(
+            "GitHub Secret GEMINI_API_KEY is missing."
+        )
 
     client = genai.Client(api_key=api_key)
 
@@ -51,8 +55,8 @@ TITLE RULES:
 - Prefer approximately 5-12 words.
 - Maximum 100 characters.
 - Emojis are optional. Use them sparingly.
-- Do not copy the example captions word-for-word.
-- Avoid boring titles such as "Beautiful Nature Video".
+- Do not copy example captions word-for-word.
+- Avoid boring generic titles.
 - Avoid clickbait and misleading claims.
 
 DESCRIPTION RULES:
@@ -65,7 +69,7 @@ DESCRIPTION RULES:
 TAGS RULES:
 - Generate up to 10 relevant YouTube search tags.
 - Include topic-specific and aesthetic keywords.
-- Do not repeat the same keyword unnecessarily.
+- Do not repeat keywords unnecessarily.
 - Do not use unrelated trending keywords.
 
 ACCURACY:
@@ -85,18 +89,47 @@ VIDEO FILENAME/CONTEXT:
 {filename}
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        ),
-    )
+    response = None
 
-    if not response.text:
+    # Retry temporary Gemini server and rate-limit errors.
+    for attempt in range(4):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
+            )
+            break
+
+        except Exception as error:
+            error_code = getattr(error, "code", None)
+
+            if error_code not in (429, 500, 502, 503, 504):
+                raise
+
+            if attempt == 3:
+                raise
+
+            wait_time = 10 * (2 ** attempt)
+
+            print(
+                f"Gemini temporarily unavailable. "
+                f"Retrying in {wait_time} seconds..."
+            )
+
+            time.sleep(wait_time)
+
+    if response is None or not response.text:
         raise RuntimeError("Gemini returned an empty response.")
 
-    data = json.loads(response.text)
+    try:
+        data = json.loads(response.text)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "Gemini returned invalid JSON metadata."
+        ) from error
 
     title = str(data.get("title", "")).strip()[:100]
     description = str(data.get("description", "")).strip()
