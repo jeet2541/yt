@@ -1,9 +1,10 @@
+
 name: Shorts AI Automation
 
 on:
   workflow_dispatch:
   schedule:
-    # 09:00 IST and 17:00 IST (GitHub cron uses UTC)
+    # 09:00 IST and 17:00 IST
     - cron: "30 3 * * *"
     - cron: "30 11 * * *"
 
@@ -37,7 +38,7 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DAILY_UPLOAD_LIMIT: "1"
-          YOUTUBE_PRIVACY: "private"
+          YOUTUBE_PRIVACY: "public"
           YOUTUBE_CATEGORY_ID: "22"
           TIMEZONE: "Asia/Kolkata"
         run: python -m src.main
@@ -45,6 +46,8 @@ jobs:
       - name: Save duplicate history
         if: always()
         run: |
+          mkdir -p data
+          touch data/upload_history.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/upload_history.json
