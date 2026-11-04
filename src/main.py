@@ -1,4 +1,4 @@
-
+```python
 import os
 import logging
 
@@ -8,7 +8,7 @@ from src.drive_manager import download_video, list_videos
 from src.duplicate_checker import (
     file_sha256,
     is_duplicate,
-    record_upload
+    record_upload,
 )
 
 from src.youtube_uploader import upload_video
@@ -42,7 +42,7 @@ DAILY_UPLOAD_LIMIT = int(
 def main():
 
     logger.info("=" * 65)
-    logger.info("YOUTUBE SHORTS AUTOMATION STARTED")
+    logger.info("YOUTUBE MUSIC AUTOMATION STARTED")
     logger.info("=" * 65)
 
     uploaded_count = 0
@@ -53,11 +53,17 @@ def main():
         logger.warning("Upload limit is zero or negative. Exiting.")
         return
 
+    # -----------------------------------------------------
+    # GET VIDEOS FROM GOOGLE DRIVE
+    # -----------------------------------------------------
+
     try:
         videos = list_videos()
 
     except Exception:
-        logger.exception("Could not retrieve videos from Google Drive.")
+        logger.exception(
+            "Could not retrieve videos from Google Drive."
+        )
         return
 
     if not videos:
@@ -67,9 +73,9 @@ def main():
     logger.info("Videos found: %s", len(videos))
     logger.info("Daily upload limit: %s", DAILY_UPLOAD_LIMIT)
 
-    # =====================================================
+    # -----------------------------------------------------
     # PROCESS VIDEOS
-    # =====================================================
+    # -----------------------------------------------------
 
     for video in videos:
 
@@ -95,9 +101,7 @@ def main():
             logger.info("-" * 65)
             logger.info("PROCESSING: %s", video_name)
 
-            # -------------------------------------------------
-            # 1. DOWNLOAD VIDEO
-            # -------------------------------------------------
+            # 1. DOWNLOAD ORIGINAL VIDEO
 
             logger.info("Downloading original video from Drive...")
 
@@ -117,13 +121,11 @@ def main():
                 raise ValueError("Downloaded video is empty.")
 
             logger.info(
-                "Download successful. File size: %.2f MB",
+                "Download successful: %.2f MB",
                 file_size / (1024 * 1024)
             )
 
-            # -------------------------------------------------
             # 2. DUPLICATE CHECK
-            # -------------------------------------------------
 
             logger.info("Checking duplicate status...")
 
@@ -141,26 +143,16 @@ def main():
 
             logger.info("Video is not a duplicate.")
 
-            # -------------------------------------------------
-            # 3. GENERATE METADATA
-            # -------------------------------------------------
+            # 3. GENERATE LOCAL MUSIC METADATA
 
-            logger.info("Generating YouTube metadata...")
+            logger.info("Generating music metadata...")
 
             metadata = generate_metadata(video_name)
 
-            if not metadata:
-                raise ValueError(
-                    "Metadata generation returned empty result."
-                )
+            if not isinstance(metadata, dict):
+                raise ValueError("Invalid metadata response.")
 
-            required_fields = [
-                "title",
-                "description",
-                "tags"
-            ]
-
-            for field in required_fields:
+            for field in ("title", "description", "tags"):
                 if field not in metadata:
                     raise ValueError(
                         f"Metadata is missing field: {field}"
@@ -169,24 +161,10 @@ def main():
             if not metadata["title"]:
                 raise ValueError("Video title is empty.")
 
-            logger.info(
-                "Selected title: %s",
-                metadata["title"]
-            )
+            logger.info("Selected title: %s", metadata["title"])
+            logger.info("Tags generated: %s", len(metadata["tags"]))
 
-            logger.info(
-                "Description length: %s characters",
-                len(metadata["description"])
-            )
-
-            logger.info(
-                "Tags generated: %s",
-                len(metadata["tags"])
-            )
-
-            # -------------------------------------------------
             # 4. UPLOAD TO YOUTUBE
-            # -------------------------------------------------
 
             logger.info("Uploading original video to YouTube...")
 
@@ -201,13 +179,11 @@ def main():
                 )
 
             logger.info(
-                "YouTube upload successful. Video ID: %s",
+                "YouTube upload successful: %s",
                 youtube_id
             )
 
-            # -------------------------------------------------
             # 5. SAVE UPLOAD HISTORY
-            # -------------------------------------------------
 
             logger.info("Saving upload history...")
 
@@ -219,11 +195,7 @@ def main():
 
             uploaded_count += 1
 
-            logger.info("=" * 65)
             logger.info("VIDEO COMPLETED SUCCESSFULLY")
-            logger.info("Drive file: %s", video_name)
-            logger.info("YouTube ID: %s", youtube_id)
-            logger.info("=" * 65)
 
         except Exception:
 
@@ -236,18 +208,13 @@ def main():
 
         finally:
 
-            # -------------------------------------------------
             # 6. CLEANUP
-            # -------------------------------------------------
 
             if local_path and os.path.isfile(local_path):
 
                 try:
                     os.remove(local_path)
-                    logger.info(
-                        "Temporary file removed: %s",
-                        video_name
-                    )
+                    logger.info("Temporary file removed.")
 
                 except OSError:
                     logger.warning(
@@ -255,13 +222,13 @@ def main():
                         local_path
                     )
 
-    # =====================================================
+    # -----------------------------------------------------
     # FINAL SUMMARY
-    # =====================================================
+    # -----------------------------------------------------
 
     logger.info("")
     logger.info("=" * 65)
-    logger.info("YOUTUBE AUTOMATION RUN COMPLETED")
+    logger.info("YOUTUBE MUSIC AUTOMATION COMPLETED")
     logger.info("=" * 65)
 
     logger.info("Total videos found: %s", len(videos))
@@ -278,3 +245,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
