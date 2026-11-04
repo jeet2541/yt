@@ -81,6 +81,7 @@ def main():
 
         local_path = None
         upload_succeeded = False
+        youtube_id = None
 
         video_name = video.get("name", "Unknown video")
         video_id = video.get("id")
@@ -150,8 +151,14 @@ def main():
                         f"Metadata is missing field: {field}"
                     )
 
-            if not metadata["title"]:
-                raise ValueError("Video title is empty.")
+            if not isinstance(metadata["title"], str) or not metadata["title"].strip():
+                raise ValueError("Video title is empty or invalid.")
+
+            if not isinstance(metadata["description"], str):
+                raise ValueError("Video description is invalid.")
+
+            if not isinstance(metadata["tags"], list):
+                raise ValueError("Video tags must be a list.")
 
             logger.info("Selected title: %s", metadata["title"])
             logger.info("Tags generated: %s", len(metadata["tags"]))
@@ -169,27 +176,59 @@ def main():
 
             upload_succeeded = True
 
+            # Count immediately after confirmed upload.
+            # History errors must not allow another upload
+            # beyond the configured limit.
+            uploaded_count += 1
+
             logger.info(
                 "YouTube upload successful: %s",
                 youtube_id
             )
 
-            # 5. SAVE UPLOAD HISTORY
-
-            logger.info("Saving upload history...")
-
-            record_upload(video, digest, youtube_id)
-
-            # 6. SAVE TITLE HISTORY ONLY AFTER SUCCESS
-
-            commit_title(metadata["title"])
-
-            uploaded_count += 1
-
             logger.info(
-                "VIDEO COMPLETED SUCCESSFULLY: https://www.youtube.com/watch?v=%s",
+                "VIDEO URL: https://www.youtube.com/watch?v=%s",
                 youtube_id
             )
+
+            # 5. SAVE UPLOAD HISTORY
+
+            history_saved = False
+
+            try:
+                logger.info("Saving upload history...")
+
+                record_upload(video, digest, youtube_id)
+
+                history_saved = True
+
+            except Exception:
+                logger.exception(
+                    "CRITICAL: YouTube upload succeeded, "
+                    "but upload history could not be saved. "
+                    "Drive ID: %s | YouTube ID: %s",
+                    video_id,
+                    youtube_id
+                )
+
+            # 6. SAVE TITLE HISTORY
+
+            try:
+                commit_title(metadata["title"])
+
+            except Exception:
+                logger.exception(
+                    "Could not save title history for: %s",
+                    metadata["title"]
+                )
+
+            if history_saved:
+                logger.info("VIDEO COMPLETED SUCCESSFULLY.")
+            else:
+                logger.critical(
+                    "MANUAL RECOVERY REQUIRED. "
+                    "Do not rerun blindly; check YouTube and upload history."
+                )
 
         except Exception:
 
@@ -197,9 +236,8 @@ def main():
 
             if upload_succeeded:
                 logger.critical(
-                    "Video was uploaded, but history saving failed. "
-                    "YouTube ID: %s | Drive ID: %s. "
-                    "Check upload history before rerunning.",
+                    "Video was uploaded, but a later operation failed. "
+                    "YouTube ID: %s | Drive ID: %s",
                     youtube_id,
                     video_id
                 )
