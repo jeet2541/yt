@@ -1,4 +1,6 @@
+
 import os
+import logging
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -6,11 +8,29 @@ from googleapiclient.http import MediaFileUpload
 from config import YOUTUBE_PRIVACY, YOUTUBE_CATEGORY_ID
 from src.google_auth import get_google_credentials
 
+
 def upload_video(file_path, metadata):
-    service = build("youtube", "v3", credentials=get_google_credentials(), cache_discovery=False)
+
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"Video not found: {file_path}")
+
+    file_size = os.path.getsize(file_path)
+
+    logging.info(
+        "Starting original-quality upload | File size: %.2f MB",
+        file_size / (1024 * 1024)
+    )
+
+    service = build(
+        "youtube",
+        "v3",
+        credentials=get_google_credentials(),
+        cache_discovery=False
+    )
+
     body = {
         "snippet": {
-            "title": metadata["title"],
+            "title": metadata["title"][:100],
             "description": metadata["description"],
             "tags": metadata["tags"],
             "categoryId": YOUTUBE_CATEGORY_ID,
@@ -20,9 +40,41 @@ def upload_video(file_path, metadata):
             "selfDeclaredMadeForKids": False,
         },
     }
-    media = MediaFileUpload(file_path, mimetype="video/*", chunksize=8 * 1024 * 1024, resumable=True)
-    request = service.videos().insert(part="snippet,status", body=body, media_body=media)
+
+    # Upload original file directly.
+    # No compression, resizing, FPS conversion or re-encoding.
+    media = MediaFileUpload(
+        file_path,
+        mimetype="video/*",
+        chunksize=8 * 1024 * 1024,
+        resumable=True
+    )
+
+    request = service.videos().insert(
+        part="snippet,status",
+        body=body,
+        media_body=media
+    )
+
     response = None
+    last_progress = -1
+
     while response is None:
-        _, response = request.next_chunk()
-    return response["id"]
+
+        status, response = request.next_chunk()
+
+        if status:
+            progress = int(status.progress() * 100)
+
+            if progress != last_progress:
+                logging.info("Upload progress: %d%%", progress)
+                last_progress = progress
+
+    video_id = response["id"]
+
+    logging.info(
+        "Upload completed successfully | YouTube ID: %s",
+        video_id
+    )
+
+    return video_id
