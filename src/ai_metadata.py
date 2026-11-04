@@ -1,476 +1,427 @@
 
-import json
 import os
-import time
-import hashlib
 import re
-import urllib.request
-import urllib.error
+import json
+import hashlib
+import logging
+from pathlib import Path
 
 from google import genai
-from google.genai import types
+from groq import Groq
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 # =========================================================
-# AESTHETIC CAPTION BANK - LOCAL BACKUP
+# SETTINGS
 # =========================================================
 
-CAPTIONS = {
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
+# =========================================================
+# LOCAL CAPTION BANK
+# =========================================================
+
+CAPTION_BANK = {
     "sunset": [
         "Where the sky turns gold and time slows down.",
-        "Chasing the last light of a beautiful day.",
-        "Somewhere between the sunset and a dream.",
-        "Golden skies and moments that last forever.",
-        "Lost somewhere in the colors of the evening.",
-        "Every sunset brings its own kind of peace."
+        "A little moment between daylight and dreams.",
+        "Some sunsets feel like a beautiful goodbye.",
+        "Golden skies and peaceful minds.",
     ],
     "ocean": [
-        "Somewhere between the waves and the wild.",
-        "Let the ocean take you somewhere peaceful.",
-        "Where turquoise waters meet endless horizons.",
-        "The sound of waves is all the music I need.",
-        "Finding peace where the land meets the sea."
+        "Somewhere between the waves and silence.",
+        "Let the ocean carry your thoughts away.",
+        "A peaceful moment by the endless blue.",
+        "Where every wave tells a story.",
     ],
     "night": [
-        "Somewhere between midnight and magic.",
-        "The moon makes even silence feel beautiful.",
-        "A thousand stars and a million little dreams.",
-        "When the world sleeps, the sky comes alive.",
-        "A dream painted across the midnight sky."
+        "Somewhere in the quiet of the night.",
+        "The world feels different after dark.",
+        "Lost in the beauty of the midnight sky.",
+        "A little silence in a noisy world.",
     ],
     "forest": [
-        "Where the forest keeps its secrets.",
-        "A little mist, a little magic, and endless green.",
-        "Somewhere nature forgot to be ordinary.",
-        "Hidden between the trees and the clouds.",
-        "A peaceful corner of a restless world."
+        "Where nature speaks without words.",
+        "A quiet escape into the green.",
+        "Finding peace between the trees.",
+        "Sometimes all you need is nature.",
     ],
     "road": [
-        "Some journeys are better without a destination.",
-        "Chasing horizons, one road at a time.",
-        "Sometimes the journey is the destination.",
-        "Somewhere between leaving and arriving.",
-        "A quiet drive through a beautiful dream."
+        "Some roads are meant to be remembered.",
+        "A journey with no need for a destination.",
+        "Chasing moments, not places.",
+        "Let the road decide the story.",
     ],
     "mountain": [
-        "Above the clouds, closer to the stars.",
-        "Where the mountains touch the morning sky.",
-        "Somewhere the clouds feel like home.",
-        "The mountains are calling in their own quiet way.",
-        "Between the mountains and the endless blue."
+        "Closer to the sky, further from the noise.",
+        "Some views make everything feel smaller.",
+        "Finding freedom above the clouds.",
+        "A moment worth climbing for.",
     ],
     "dream": [
-        "Somewhere between imagination and reality.",
-        "A moment that feels too beautiful to be real.",
-        "Escaping reality, one beautiful frame at a time.",
-        "A beautiful escape from the ordinary.",
-        "Where reality fades and imagination begins."
+        "Somewhere between reality and imagination.",
+        "A feeling that words cannot explain.",
+        "Little moments, endless memories.",
+        "A world of beautiful possibilities.",
+    ],
+    "default": [
+        "A moment worth remembering.",
+        "Sometimes simple moments feel extraordinary.",
+        "Collecting moments, one frame at a time.",
+        "A little beauty in everyday life.",
     ],
 }
 
-
-CATEGORY_KEYWORDS = {
-    "sunset": ["sunset", "sunrise", "golden", "evening", "dusk", "sky"],
-    "ocean": ["ocean", "sea", "beach", "wave", "water", "coast", "tropical"],
-    "night": ["moon", "night", "star", "midnight", "galaxy", "space"],
-    "forest": ["forest", "tree", "nature", "green", "mist", "jungle"],
-    "road": ["road", "drive", "car", "travel", "journey", "highway"],
-    "mountain": ["mountain", "cloud", "hill", "snow", "peak"],
-}
-
-
-PROMPT_TEMPLATE = """
-You create beautiful YouTube Shorts metadata for aesthetic,
-dreamy and cinematic visual content.
-
-STYLE EXAMPLES:
-- Where the sky turns gold and time slows down.
-- Somewhere between the sunset and a dream.
-- Where turquoise waters meet endless horizons.
-- Somewhere between midnight and magic.
-- Where the forest keeps its secrets.
-- Some journeys are better without a destination.
-- Above the clouds, closer to the stars.
-- Somewhere between imagination and reality.
-
-Create a UNIQUE title inspired by this writing style.
-Do not copy examples word-for-word.
-
-Rules:
-- Title: poetic, attractive, maximum 100 characters.
-- Description: short, relevant and natural.
-- Add 2-3 relevant hashtags in description.
-- Tags: up to 10 relevant YouTube tags.
-- Avoid clickbait and keyword stuffing.
-- Do not invent details about footage you cannot see.
-- Use the filename only as context.
-
-Return valid JSON only:
-{
-  "title": "A unique aesthetic title",
-  "description": "A short description with hashtags",
-  "tags": ["tag1", "tag2", "tag3"]
-}
-
-Video filename/context: {filename}
-"""
-
-
-# =========================================================
-# HELPERS
-# =========================================================
 
 def detect_category(filename):
     name = filename.lower()
 
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        if any(word in name for word in keywords):
+    keywords = {
+        "sunset": ["sunset", "sunrise", "golden", "dusk", "sky"],
+        "ocean": ["ocean", "sea", "beach", "wave", "water"],
+        "night": ["night", "moon", "stars", "midnight", "dark"],
+        "forest": ["forest", "tree", "nature", "green", "wood"],
+        "road": ["road", "drive", "car", "highway", "street"],
+        "mountain": ["mountain", "hill", "snow", "peak"],
+        "dream": ["dream", "aesthetic", "abstract", "universe"],
+    }
+
+    for category, words in keywords.items():
+        if any(word in name for word in words):
             return category
 
-    return "dream"
+    return "default"
 
 
-def parse_metadata(text, filename):
-    if not text:
-        raise ValueError("AI returned empty response.")
+# =========================================================
+# LOCAL FALLBACK
+# =========================================================
 
-    text = text.strip()
+def generate_fallback_metadata(filename):
+    category = detect_category(filename)
 
-    # Remove Markdown code fences if present.
+    captions = CAPTION_BANK.get(
+        category,
+        CAPTION_BANK["default"]
+    )
+
+    # Stable selection: same filename gets same caption
+    digest = hashlib.sha256(
+        filename.encode("utf-8")
+    ).hexdigest()
+
+    index = int(digest[:8], 16) % len(captions)
+    title = captions[index]
+
+    clean_name = Path(filename).stem
+    clean_name = re.sub(r"[_-]+", " ", clean_name)
+    clean_name = re.sub(r"\s+", " ", clean_name).strip()
+
+    description = (
+        f"{title}\n\n"
+        f"Enjoy this aesthetic {category} video. "
+        f"Follow for more beautiful moments and visual inspiration.\n\n"
+        "#shorts #aesthetic #viral"
+    )
+
+    tags = [
+        "shorts",
+        "youtube shorts",
+        "aesthetic",
+        category,
+        "beautiful moments",
+        "cinematic",
+        "visuals",
+        "relaxing",
+    ]
+
+    logging.warning("Using local fallback metadata.")
+
+    return {
+        "title": title[:100],
+        "description": description[:5000],
+        "tags": tags[:15],
+    }
+
+
+# =========================================================
+# PROMPT
+# =========================================================
+
+PROMPT_TEMPLATE = """
+You are a professional YouTube Shorts metadata expert.
+
+Create attractive, natural and aesthetic metadata for a short video.
+
+Video filename: {filename}
+
+IMPORTANT RULES:
+
+1. Create a beautiful, engaging and natural title.
+2. Title should feel emotional, cinematic or interesting.
+3. Avoid generic clickbait.
+4. Do not mention that the title was generated by AI.
+5. Create a short, attractive description.
+6. Include relevant hashtags in the description.
+7. Generate 8 to 15 relevant YouTube tags.
+8. Do not invent specific events or objects that cannot be confirmed
+   from the filename.
+9. Return ONLY valid JSON. No markdown or explanation.
+
+Required JSON structure:
+
+{{
+  "title": "Your creative title here",
+  "description": "Your engaging description here",
+  "tags": ["tag1", "tag2", "tag3"]
+}}
+"""
+
+
+# =========================================================
+# JSON PARSER
+# =========================================================
+
+def parse_metadata(response_text):
+    if not response_text:
+        raise ValueError("Empty AI response.")
+
+    text = response_text.strip()
+
+    # Remove Markdown code fences if present
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
 
-    data = json.loads(text)
+    # Extract JSON object
+    start = text.find("{")
+    end = text.rfind("}")
 
-    title = str(data.get("title", "")).strip()[:100]
+    if start == -1 or end == -1:
+        raise ValueError("No JSON object found in AI response.")
+
+    data = json.loads(text[start:end + 1])
+
+    title = str(data.get("title", "")).strip()
     description = str(data.get("description", "")).strip()
     tags = data.get("tags", [])
 
     if not title:
-        raise ValueError("AI did not generate a title.")
+        raise ValueError("AI returned an empty title.")
 
     if not isinstance(tags, list):
         tags = []
 
     tags = [
-        str(tag).strip()[:100]
+        str(tag).strip()
         for tag in tags
         if str(tag).strip()
-    ][:10]
-
-    return {
-        "title": title,
-        "description": description,
-        "tags": tags
-    }
-
-
-def generate_fallback_metadata(filename):
-    """Generate metadata locally without any API."""
-
-    category = detect_category(filename)
-    captions = CAPTIONS[category]
-
-    file_hash = hashlib.sha256(
-        filename.encode("utf-8")
-    ).hexdigest()
-
-    index = int(file_hash[:8], 16) % len(captions)
-    title = captions[index]
-
-    clean_name = re.sub(
-        r"[_\-.]+",
-        " ",
-        os.path.splitext(filename)[0]
-    ).strip()
-
-    descriptions = {
-        "sunset": "A peaceful moment filled with golden skies and beautiful colors.",
-        "ocean": "Escape into the calm beauty of waves, water and endless horizons.",
-        "night": "A dreamy night atmosphere beneath a beautiful sky.",
-        "forest": "Find a little peace in the beauty of nature and quiet landscapes.",
-        "road": "A cinematic journey through beautiful roads and unforgettable moments.",
-        "mountain": "A peaceful escape into the beauty of mountains and clouds.",
-        "dream": "A beautiful aesthetic moment somewhere between imagination and reality."
-    }
-
-    tag_groups = {
-        "sunset": ["sunset", "golden hour", "sunset aesthetic", "beautiful sky"],
-        "ocean": ["ocean", "beach aesthetic", "ocean waves", "tropical"],
-        "night": ["night aesthetic", "moonlight", "stars", "dreamy night"],
-        "forest": ["forest aesthetic", "nature", "green landscape", "misty forest"],
-        "road": ["cinematic drive", "travel aesthetic", "beautiful roads", "journey"],
-        "mountain": ["mountains", "clouds", "mountain aesthetic", "nature views"],
-        "dream": ["aesthetic", "dreamy visuals", "cinematic", "beautiful scenery"]
-    }
-
-    tags = tag_groups[category] + [
-        "aesthetic shorts",
-        "relaxing visuals",
-        "cinematic shorts"
     ]
-
-    description = descriptions[category]
-
-    if clean_name:
-        description += f" Video theme: {clean_name}."
-
-    description += "\n\nEnjoy the view and take a moment to relax."
-    description += "\n#aesthetic #shorts #cinematic"
 
     return {
         "title": title[:100],
-        "description": description,
-        "tags": tags[:10]
+        "description": description[:5000],
+        "tags": tags[:15],
     }
 
 
 # =========================================================
-# GEMINI - DISCOVER AVAILABLE GENERATION MODELS
+# GEMINI
 # =========================================================
 
-def get_gemini_models(client):
+def try_gemini(filename):
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is missing.")
+
+    logging.info("Starting Gemini metadata generation.")
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    prompt = PROMPT_TEMPLATE.replace(
+        "{filename}",
+        Path(filename).name
+    )
+
     models = []
 
     for model in client.models.list():
-        name = getattr(model, "name", None)
+        model_name = getattr(model, "name", None)
+        supported_actions = getattr(
+            model,
+            "supported_actions",
+            []
+        ) or []
 
-        if not name:
+        if not model_name:
             continue
 
-        model_id = name.replace("models/", "")
-
-        if not model_id.startswith("gemini-"):
+        # Only use models that support content generation
+        if "generateContent" not in supported_actions:
             continue
 
-        # Skip non-text-generation model families.
-        excluded = (
-            "embedding",
-            "image",
-            "tts",
-            "audio",
-            "veo",
-            "robotics",
-            "computer-use"
-        )
-
-        if any(word in model_id.lower() for word in excluded):
-            continue
-
-        actions = (
-            getattr(model, "supported_actions", None)
-            or getattr(model, "supported_generation_methods", None)
-        )
-
-        # If the API exposes supported actions, verify generateContent.
-        if actions:
-            if not any("generatecontent" in str(a).lower() for a in actions):
-                continue
-
-        models.append(model_id)
-
-    # Try Flash models first, then other eligible Gemini models.
-    models = sorted(
-        set(models),
-        key=lambda x: (
-            "flash" not in x.lower(),
-            x.lower()
-        )
-    )
-
-    return models
-
-
-def try_gemini(filename):
-    api_key = os.getenv("GEMINI_API_KEY")
-
-    if not api_key:
-        print("GEMINI_API_KEY missing. Skipping Gemini.")
-        return None
-
-    try:
-        client = genai.Client(api_key=api_key)
-        models = get_gemini_models(client)
-
-        print(f"Gemini models discovered: {len(models)}")
-
-    except Exception as error:
-        print(f"Could not list Gemini models: {error}")
-        return None
+        models.append(model_name)
 
     if not models:
-        print("No eligible Gemini models found.")
-        return None
+        raise RuntimeError("No Gemini generateContent models found.")
 
-    prompt = PROMPT_TEMPLATE.format(filename=filename)
-
-    for model_id in models:
-        try:
-            print(f"Trying Gemini model: {model_id}")
-
-            response = client.models.generate_content(
-                model=model_id,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.9
-                )
-            )
-
-            result = parse_metadata(response.text, filename)
-
-            print(f"Gemini SUCCESS: {model_id}")
-            return result
-
-        except Exception as error:
-            print(f"Gemini model failed: {model_id} | {error}")
-            continue
-
-    print("All eligible Gemini models failed.")
-    return None
-
-
-# =========================================================
-# GROQ - LIVE MODEL DISCOVERY + FALLBACK
-# =========================================================
-
-def groq_request(api_key, endpoint, method="GET", payload=None):
-    url = "https://api.groq.com/openai/v1/" + endpoint
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    data = None
-
-    if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-        method=method
+    # Prefer Flash models first
+    models.sort(
+        key=lambda name: (
+            "flash" not in name.lower(),
+            name.lower()
+        )
     )
 
-    with urllib.request.urlopen(request, timeout=45) as response:
-        return json.loads(response.read().decode("utf-8"))
+    logging.info(
+        "Gemini generation-capable models discovered: %s",
+        len(models)
+    )
 
+    errors = []
 
-def try_groq(filename):
-    api_key = os.getenv("GROQ_API_KEY")
-
-    if not api_key:
-        print("GROQ_API_KEY missing. Skipping Groq.")
-        return None
-
-    try:
-        model_data = groq_request(api_key, "models")
-        available_models = model_data.get("data", [])
-
-        # Exclude audio, moderation and other non-chat model families.
-        excluded = (
-            "whisper",
-            "guard",
-            "speech",
-            "audio",
-            "distil"
-        )
-
-        models = [
-            item.get("id")
-            for item in available_models
-            if item.get("id")
-            and item.get("active", True)
-            and not any(
-                word in item.get("id", "").lower()
-                for word in excluded
-            )
-        ]
-
-        preferred = os.getenv("GROQ_MODEL")
-
-        if preferred and preferred in models:
-            models.remove(preferred)
-            models.insert(0, preferred)
-
-        print(f"Groq chat model candidates: {len(models)}")
-
-    except Exception as error:
-        print(f"Could not list Groq models: {error}")
-        return None
-
-    prompt = PROMPT_TEMPLATE.format(filename=filename)
-
-    for model_id in models:
+    for model_name in models:
         try:
-            print(f"Trying Groq model: {model_id}")
+            logging.info("Trying Gemini model: %s", model_name)
 
-            result = groq_request(
-                api_key,
-                "chat/completions",
-                method="POST",
-                payload={
-                    "model": model_id,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "Return valid JSON only. Do not use Markdown."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "temperature": 0.9,
-                    "max_tokens": 500,
-                    "response_format": {
-                        "type": "json_object"
-                    }
-                }
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
             )
 
-            content = result["choices"][0]["message"]["content"]
-            metadata = parse_metadata(content, filename)
+            metadata = parse_metadata(response.text)
 
-            print(f"Groq SUCCESS: {model_id}")
+            logging.info(
+                "Gemini succeeded with model: %s",
+                model_name
+            )
+
             return metadata
 
         except Exception as error:
-            print(f"Groq model failed: {model_id} | {error}")
-            continue
+            logging.warning(
+                "Gemini model failed: %s | %s",
+                model_name,
+                error
+            )
+            errors.append(str(error))
 
-    print("All eligible Groq models failed.")
-    return None
+    raise RuntimeError(
+        "All Gemini models failed. " + " | ".join(errors[-3:])
+    )
 
 
 # =========================================================
-# MAIN PROVIDER ROUTER
-# GEMINI -> GROQ -> LOCAL BACKUP
+# GROQ
+# =========================================================
+
+def try_groq(filename):
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is missing.")
+
+    logging.info("Starting Groq metadata generation.")
+
+    client = Groq(api_key=GROQ_API_KEY)
+
+    prompt = PROMPT_TEMPLATE.replace(
+        "{filename}",
+        Path(filename).name
+    )
+
+    errors = []
+
+    for model_name in GROQ_MODELS:
+        try:
+            logging.info("Trying Groq model: %s", model_name)
+
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an expert YouTube Shorts "
+                            "metadata generator. Return only valid JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                temperature=0.8,
+                max_tokens=500,
+            )
+
+            response_text = (
+                response.choices[0].message.content
+            )
+
+            metadata = parse_metadata(response_text)
+
+            logging.info(
+                "Groq succeeded with model: %s",
+                model_name
+            )
+
+            return metadata
+
+        except Exception as error:
+            logging.warning(
+                "Groq model failed: %s | %s",
+                model_name,
+                error
+            )
+            errors.append(str(error))
+
+    raise RuntimeError(
+        "All Groq models failed. " + " | ".join(errors[-3:])
+    )
+
+
+# =========================================================
+# MAIN METADATA GENERATION
 # =========================================================
 
 def generate_metadata(filename):
+    logging.info("=" * 55)
+    logging.info("AI METADATA GENERATION STARTED")
+    logging.info("File: %s", filename)
+    logging.info("=" * 55)
 
-    print("\n========================================")
-    print("AI METADATA GENERATION STARTED")
-    print("========================================")
+    # 1. Gemini
+    try:
+        metadata = try_gemini(filename)
+        logging.info("Metadata provider: Gemini")
+        return metadata
 
-    # First: Try all eligible Gemini models.
-    result = try_gemini(filename)
+    except Exception:
+        logging.exception(
+            "Gemini failed. Switching to Groq."
+        )
 
-    if result:
-        return result
+    # 2. Groq
+    try:
+        metadata = try_groq(filename)
+        logging.info("Metadata provider: Groq")
+        return metadata
 
-    # Second: Try available Groq chat models.
-    print("\nSwitching to Groq...")
-    result = try_groq(filename)
+    except Exception:
+        logging.exception(
+            "Groq failed. Switching to local fallback."
+        )
 
-    if result:
-        return result
+    # 3. Local fallback
+    metadata = generate_fallback_metadata(filename)
 
-    # Final: Generate metadata locally.
-    print("\nBoth AI providers failed.")
-    print("Using local aesthetic caption backup.")
+    logging.info("Metadata provider: Local fallback")
+    logging.info("Fallback title: %s", metadata["title"])
 
-    return generate_fallback_metadata(filename)
+    return metadata
