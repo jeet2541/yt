@@ -1,5 +1,4 @@
 
-import os
 import logging
 from pathlib import Path
 
@@ -37,7 +36,13 @@ def list_videos():
         ).execute()
 
         for item in result.get("files", []):
-            if Path(item["name"]).suffix.lower() in VIDEO_EXTENSIONS:
+            filename = item.get("name", "")
+            mime_type = item.get("mimeType", "")
+
+            if (
+                Path(filename).suffix.lower() in VIDEO_EXTENSIONS
+                and mime_type.startswith("video/")
+            ):
                 found.append(item)
 
         page_token = result.get("nextPageToken")
@@ -58,46 +63,51 @@ def download_video(file_id, filename):
 
     request = service.files().get_media(fileId=file_id)
 
-    with destination.open("wb") as handle:
-        downloader = MediaIoBaseDownload(
-            handle,
-            request,
-            chunksize=8 * 1024 * 1024
+    try:
+        with destination.open("wb") as handle:
+            downloader = MediaIoBaseDownload(
+                handle,
+                request,
+                chunksize=8 * 1024 * 1024
+            )
+
+            done = False
+
+            while not done:
+                status, done = downloader.next_chunk()
+
+                if status:
+                    logging.info(
+                        "Download progress: %d%%",
+                        int(status.progress() * 100)
+                    )
+
+        actual_size = destination.stat().st_size
+
+        drive_file = service.files().get(
+            fileId=file_id,
+            fields="size"
+        ).execute()
+
+        expected_size = int(drive_file.get("size", 0))
+
+        if expected_size and actual_size != expected_size:
+            raise RuntimeError(
+                f"Download size mismatch. "
+                f"Expected: {expected_size}, Got: {actual_size}"
+            )
+
+        if actual_size == 0:
+            raise RuntimeError("Downloaded video is empty.")
+
+        logging.info(
+            "Original video downloaded and verified: %s (%.2f MB)",
+            filename,
+            actual_size / (1024 * 1024)
         )
 
-        done = False
+        return str(destination)
 
-        while not done:
-            status, done = downloader.next_chunk()
-
-            if status:
-                logging.info(
-                    "Download progress: %d%%",
-                    int(status.progress() * 100)
-                )
-
-    actual_size = destination.stat().st_size
-
-    # Verify downloaded size against Google Drive metadata.
-    drive_file = service.files().get(
-        fileId=file_id,
-        fields="size"
-    ).execute()
-
-    expected_size = int(drive_file.get("size", 0))
-
-    if expected_size and actual_size != expected_size:
+    except Exception:
         destination.unlink(missing_ok=True)
-
-        raise RuntimeError(
-            f"Download size mismatch. "
-            f"Expected: {expected_size}, Got: {actual_size}"
-        )
-
-    logging.info(
-        "Original video downloaded and verified: %s (%.2f MB)",
-        filename,
-        actual_size / (1024 * 1024)
-    )
-
-    return str(destination)
+        raise
