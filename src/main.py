@@ -2,11 +2,7 @@
 import logging
 import os
 
-from src.ai_metadata import (
-    generate_metadata,
-    generate_fallback_metadata
-)
-
+from src.ai_metadata import generate_metadata
 from src.drive_manager import download_video, list_videos
 from src.duplicate_checker import (
     file_sha256,
@@ -52,24 +48,13 @@ def main():
                 )
                 continue
 
-            # Try Gemini first, use local backup if it fails.
-            try:
-                metadata = generate_metadata(video["name"])
+            # Gemini -> Groq -> Local backup
+            metadata = generate_metadata(video["name"])
 
-                logging.info(
-                    "Gemini AI metadata generated successfully."
-                )
-
-            except Exception:
-                logging.exception(
-                    "Gemini failed. Switching to local fallback metadata."
-                )
-
-                metadata = generate_fallback_metadata(
-                    video["name"]
-                )
-
-            logging.info("Selected title: %s", metadata["title"])
+            logging.info(
+                "Selected title: %s",
+                metadata["title"]
+            )
 
             youtube_id = upload_video(
                 local_path,
