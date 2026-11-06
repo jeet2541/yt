@@ -5,8 +5,14 @@ on:
   workflow_dispatch:
 
   schedule:
+    # 9:00 AM IST
+    - cron: "30 3 * * *"
+
     # 12:30 PM IST
     - cron: "0 7 * * *"
+
+    # 4:00 PM IST
+    - cron: "30 10 * * *"
 
     # 7:00 PM IST
     - cron: "30 13 * * *"
@@ -117,17 +123,14 @@ jobs:
 
             echo "Push attempt $attempt of 5"
 
-            # Fetch latest remote changes
             git fetch origin main
 
-            # Rebase local commit onto latest main
             if ! git rebase origin/main; then
               echo "Rebase failed. Aborting."
               git rebase --abort || true
               exit 1
             fi
 
-            # Push updated history
             if git push origin HEAD:main; then
               echo "History pushed successfully."
               exit 0
