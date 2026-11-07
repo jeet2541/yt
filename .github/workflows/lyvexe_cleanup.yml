@@ -1,0 +1,37 @@
+
+name: LYVEXE Generated Video Cleanup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lyvexe-pairs-automation
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r lyvexe_pairs/requirements.txt
+
+      - name: Clean generated videos
+        env:
+          LYVEXE_PAIRS_TOKEN_JSON: ${{ secrets.LYVEXE_PAIRS_TOKEN_JSON }}
+          LYVEXE_GENERATED_FOLDER_ID: ${{ secrets.LYVEXE_GENERATED_FOLDER_ID }}
+        run: python lyvexe_pairs/cleanup.py
