@@ -93,7 +93,7 @@ jobs:
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
 
-          DAILY_UPLOAD_LIMIT: "1"
+          DAILY_UPLOAD_LIMIT: "3"
           YOUTUBE_PRIVACY: "public"
           YOUTUBE_CATEGORY_ID: "10"
           TIMEZONE: "Asia/Kolkata"
