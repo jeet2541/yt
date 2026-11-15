@@ -9,14 +9,11 @@ from src.duplicate_checker import (
     file_sha256,
     is_duplicate,
     record_upload,
+    count_uploads_today,
 )
 
 from src.youtube_uploader import upload_video
 
-
-# =========================================================
-# LOGGING
-# =========================================================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,57 +22,69 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Maximum one upload per workflow run
+RUN_UPLOAD_LIMIT = int(os.getenv("DAILY_UPLOAD_LIMIT", "1"))
 
-# =========================================================
-# SETTINGS
-# =========================================================
+# Maximum three uploads across all runs in one IST day
+DAILY_TOTAL_LIMIT = int(os.getenv("DAILY_TOTAL_LIMIT", "3"))
 
-DAILY_UPLOAD_LIMIT = int(os.getenv("DAILY_UPLOAD_LIMIT", "1"))
-
-
-# =========================================================
-# MAIN
-# =========================================================
 
 def main():
 
-    logger.info("=" * 65)
+    logger.info("=" * 60)
     logger.info("YOUTUBE MUSIC AUTOMATION STARTED")
-    logger.info("=" * 65)
+    logger.info("=" * 60)
 
     uploaded_count = 0
     skipped_count = 0
     failed_count = 0
 
-    if DAILY_UPLOAD_LIMIT <= 0:
-        logger.warning("Upload limit is zero or negative. Exiting.")
+    if RUN_UPLOAD_LIMIT <= 0 or DAILY_TOTAL_LIMIT <= 0:
+        logger.error("Invalid upload limits.")
         return
 
-    # -----------------------------------------------------
-    # GET VIDEOS FROM GOOGLE DRIVE
-    # -----------------------------------------------------
+    # Check persistent daily history
+    try:
+        daily_count = count_uploads_today()
+    except Exception:
+        logger.exception("Could not check daily upload history.")
+        return
+
+    logger.info("Already uploaded today: %s", daily_count)
+    logger.info("Daily maximum: %s", DAILY_TOTAL_LIMIT)
+    logger.info("Per-run maximum: %s", RUN_UPLOAD_LIMIT)
+
+    if daily_count >= DAILY_TOTAL_LIMIT:
+        logger.info("Daily limit reached. Skipping this run.")
+        return
 
     try:
         videos = list_videos()
-
     except Exception:
-        logger.exception("Could not retrieve videos from Google Drive.")
+        logger.exception("Could not retrieve Google Drive videos.")
         return
 
     if not videos:
-        logger.info("No videos found in Google Drive.")
+        logger.info("No videos found.")
         return
 
     logger.info("Videos found: %s", len(videos))
-    logger.info("Daily upload limit: %s", DAILY_UPLOAD_LIMIT)
-
-    # -----------------------------------------------------
-    # PROCESS VIDEOS
-    # -----------------------------------------------------
 
     for video in videos:
 
-        if uploaded_count >= DAILY_UPLOAD_LIMIT:
+        # Per-run limit
+        if uploaded_count >= RUN_UPLOAD_LIMIT:
+            logger.info("Per-run upload limit reached.")
+            break
+
+        # Daily limit (recheck persistent history)
+        try:
+            daily_count = count_uploads_today()
+        except Exception:
+            logger.exception("Could not verify daily upload count.")
+            break
+
+        if daily_count >= DAILY_TOTAL_LIMIT:
             logger.info("Daily upload limit reached.")
             break
 
@@ -83,206 +92,122 @@ def main():
         upload_succeeded = False
         youtube_id = None
 
-        video_name = video.get("name", "Unknown video")
+        video_name = video.get("name", "Unknown")
         video_id = video.get("id")
 
         try:
 
             if not video_id:
-                logger.warning(
-                    "Skipping video with missing Drive ID: %s",
-                    video_name
-                )
                 skipped_count += 1
                 continue
 
-            logger.info("-" * 65)
+            logger.info("-" * 60)
             logger.info("PROCESSING: %s", video_name)
 
-            # 1. DOWNLOAD ORIGINAL VIDEO
-
-            logger.info("Downloading original video from Drive...")
-
+            # Download
             local_path = download_video(video_id, video_name)
 
             if not local_path or not os.path.isfile(local_path):
-                raise FileNotFoundError(
-                    "Downloaded video file was not found."
-                )
+                raise FileNotFoundError("Downloaded file not found.")
 
-            file_size = os.path.getsize(local_path)
-
-            if file_size <= 0:
+            if os.path.getsize(local_path) <= 0:
                 raise ValueError("Downloaded video is empty.")
 
-            logger.info(
-                "Download successful: %.2f MB",
-                file_size / (1024 * 1024)
-            )
-
-            # 2. DUPLICATE CHECK
-
-            logger.info("Checking duplicate status...")
-
+            # Duplicate check
             digest = file_sha256(local_path)
 
             if is_duplicate(video_id, digest):
-                logger.info(
-                    "Duplicate detected. Skipping: %s",
-                    video_name
-                )
+                logger.info("Duplicate skipped: %s", video_name)
                 skipped_count += 1
                 continue
 
-            logger.info("Video is not a duplicate.")
-
-            # 3. GENERATE METADATA
-
-            logger.info("Generating music metadata...")
-
+            # Generate metadata
             metadata = generate_metadata(video_name)
 
             if not isinstance(metadata, dict):
-                raise ValueError("Invalid metadata response.")
+                raise ValueError("Invalid metadata.")
 
             for field in ("title", "description", "tags"):
                 if field not in metadata:
-                    raise ValueError(
-                        f"Metadata is missing field: {field}"
-                    )
+                    raise ValueError(f"Missing metadata field: {field}")
 
             if not isinstance(metadata["title"], str) or not metadata["title"].strip():
-                raise ValueError("Video title is empty or invalid.")
+                raise ValueError("Invalid title.")
 
             if not isinstance(metadata["description"], str):
-                raise ValueError("Video description is invalid.")
+                raise ValueError("Invalid description.")
 
             if not isinstance(metadata["tags"], list):
-                raise ValueError("Video tags must be a list.")
+                raise ValueError("Invalid tags.")
 
-            logger.info("Selected title: %s", metadata["title"])
-            logger.info("Tags generated: %s", len(metadata["tags"]))
-
-            # 4. UPLOAD TO YOUTUBE
-
-            logger.info("Uploading original video to YouTube...")
-
+            # Upload exactly one video
             youtube_id = upload_video(local_path, metadata)
 
             if not youtube_id:
-                raise RuntimeError(
-                    "YouTube upload returned no video ID."
-                )
+                raise RuntimeError("YouTube upload failed.")
 
             upload_succeeded = True
-
-            # Count immediately after confirmed upload.
-            # History errors must not allow another upload
-            # beyond the configured limit.
             uploaded_count += 1
 
-            logger.info(
-                "YouTube upload successful: %s",
-                youtube_id
-            )
-
+            logger.info("UPLOAD SUCCESSFUL: %s", youtube_id)
             logger.info(
                 "VIDEO URL: https://www.youtube.com/watch?v=%s",
                 youtube_id
             )
 
-            # 5. SAVE UPLOAD HISTORY
-
-            history_saved = False
-
+            # Save upload history
             try:
-                logger.info("Saving upload history...")
-
                 record_upload(video, digest, youtube_id)
-
-                history_saved = True
-
             except Exception:
                 logger.exception(
-                    "CRITICAL: YouTube upload succeeded, "
-                    "but upload history could not be saved. "
-                    "Drive ID: %s | YouTube ID: %s",
-                    video_id,
-                    youtube_id
+                    "CRITICAL: Upload succeeded but history save failed. "
+                    "Check YouTube and history manually before next run."
                 )
+                break
 
-            # 6. SAVE TITLE HISTORY
-
+            # Save title history
             try:
                 commit_title(metadata["title"])
-
             except Exception:
-                logger.exception(
-                    "Could not save title history for: %s",
-                    metadata["title"]
-                )
-
-            if history_saved:
-                logger.info("VIDEO COMPLETED SUCCESSFULLY.")
-            else:
-                logger.critical(
-                    "MANUAL RECOVERY REQUIRED. "
-                    "Do not rerun blindly; check YouTube and upload history."
-                )
+                logger.exception("Could not save title history.")
 
         except Exception:
-
             failed_count += 1
 
             if upload_succeeded:
                 logger.critical(
-                    "Video was uploaded, but a later operation failed. "
-                    "YouTube ID: %s | Drive ID: %s",
-                    youtube_id,
-                    video_id
+                    "Upload succeeded but a later operation failed: %s",
+                    youtube_id
                 )
 
-            logger.exception(
-                "VIDEO PROCESSING FAILED: %s",
-                video_name
-            )
+            logger.exception("VIDEO PROCESSING FAILED: %s", video_name)
 
         finally:
 
-            # 7. CLEANUP
-
             if local_path and os.path.isfile(local_path):
-
                 try:
                     os.remove(local_path)
                     logger.info("Temporary file removed.")
-
                 except OSError:
-                    logger.warning(
-                        "Could not remove temporary file: %s",
-                        local_path
-                    )
+                    logger.warning("Could not remove temporary file.")
 
-    # -----------------------------------------------------
-    # FINAL SUMMARY
-    # -----------------------------------------------------
+    logger.info("=" * 60)
+    logger.info("AUTOMATION COMPLETED")
+    logger.info("Uploaded this run: %s", uploaded_count)
 
-    logger.info("")
-    logger.info("=" * 65)
-    logger.info("YOUTUBE MUSIC AUTOMATION COMPLETED")
-    logger.info("=" * 65)
+    try:
+        logger.info(
+            "Total uploaded today: %s / %s",
+            count_uploads_today(),
+            DAILY_TOTAL_LIMIT
+        )
+    except Exception:
+        logger.exception("Could not read final daily count.")
 
-    logger.info("Total videos found: %s", len(videos))
-    logger.info("Successfully uploaded: %s", uploaded_count)
-    logger.info("Skipped videos: %s", skipped_count)
-    logger.info("Failed videos: %s", failed_count)
+    logger.info("Skipped: %s", skipped_count)
+    logger.info("Failed: %s", failed_count)
+    logger.info("=" * 60)
 
-    logger.info("=" * 65)
-
-
-# =========================================================
-# ENTRY POINT
-# =========================================================
 
 if __name__ == "__main__":
     main()
