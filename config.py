@@ -1,17 +1,18 @@
 
 import os
 
-# YouTube upload settings
+# Upload limits
 DAILY_UPLOAD_LIMIT = int(os.getenv("DAILY_UPLOAD_LIMIT", "1"))
-YOUTUBE_PRIVACY = os.getenv("YOUTUBE_PRIVACY", "public")
+DAILY_TOTAL_LIMIT = int(os.getenv("DAILY_TOTAL_LIMIT", "3"))
 
-# Music category = 10
+# YouTube settings
+YOUTUBE_PRIVACY = os.getenv("YOUTUBE_PRIVACY", "public")
 YOUTUBE_CATEGORY_ID = os.getenv("YOUTUBE_CATEGORY_ID", "10")
 
 # Timezone
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Kolkata")
 
-# Google Drive and YouTube authentication
+# Authentication
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 YOUTUBE_TOKEN_JSON = os.getenv("YOUTUBE_TOKEN_JSON")
 
